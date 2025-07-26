@@ -1,3 +1,4 @@
+# src/ui/ui.py
 import sys
 import subprocess
 import threading

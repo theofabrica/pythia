@@ -1,0 +1,39 @@
+(base) theoub02@theoub02:~/ai_gen/Projets/pythia$ tree
+.
+├── main.py
+├── pyproject.toml
+├── README.md
+├── src
+│   ├── chains
+│   │   ├── __pycache__
+│   │   │   └── simple_chat.cpython-311.pyc
+│   │   └── simple_chat.py
+│   ├── models
+│   │   ├── Llama-3.1-8B-Instruct
+│   │   ├── Llama-4-Scout-17B-16E-Instruct
+│   │   └── Mistral-7B-Instruct-v0.3
+│   ├── tools
+│   │   ├── chat_memory.py
+│   │   └── __pycache__
+│   │       └── chat_memory.cpython-311.pyc
+│   ├── ui
+│   │   └── ui.py
+│   └── vllm_server
+│       ├── close_vllm_server.py
+│       ├── Llama-3.1-8B-Instruct.json
+│       ├── Llama-4-Scout-17B-16E-Instruct.json
+│       ├── Mistral-7B-Instruct-v0.3.json
+│       ├── __pycache__
+│       │   └── vllm_chat_server.cpython-311.pyc
+│       └── vllm_chat_server.py
+├── toGPT
+│   ├── chat_memory.txt
+│   ├── close_vllm_server.txt
+│   ├── Llama-3.1-8B-Instruct.txt
+│   ├── simple_chat.txt
+│   ├── ui.txt
+│   └── vllm_chat_server.txt
+└── uv.lock
+
+13 directories, 21 files
+

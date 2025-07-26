@@ -1,0 +1,46 @@
+{
+  // Nom du modèle (nom du dossier sous models/)
+  "model_name": "Llama-4-Scout-17B-16E-Instruct",
+
+  // Chemin relatif depuis la racine du projet
+  "absolute_path": "/media/theoub02/DATA/ai_models/Llama/Llama-4-Scout-17B-16E-Instruct",
+
+  // Type de données pour les poids du modèle.
+  // Valeurs possibles : "float32", "float16", "bfloat16", "fp8"
+  "dtype": "bfloat16",
+
+  // Méthode de quantification à appliquer.
+  // Valeurs possibles : null (pas de quantization), "gptq", "bitsandbytes"
+  "quantization": null,
+
+  // Type de données du cache de clés/valeurs (KV cache).
+  // Valeurs possibles : "auto", "float16", "bfloat16", "float32", "fp8"
+  "kv_cache_dtype": "auto",
+
+  // Fraction de la mémoire GPU à réserver (entre 0.0 et 1.0).
+  "gpu_memory_utilization": 0.9,
+
+  // Longueur maximale du contexte en tokens.
+  // Valeurs typiques : 16384, 32768, 65536, 131072
+  "max_model_len": 32768,
+
+  // Nombre de GPUs pour le parallélisme tensoriel.
+  // Entier >= 1
+  "tensor_parallel_size": 1,
+
+  // Nombre d'étapes pour le parallélisme de pipeline.
+  // Entier >= 1
+  "pipeline_parallel_size": 1,
+
+  // Nombre maximal de séquences traitées en parallèle.
+  "max_num_seqs": 4,
+
+  // Nombre maximal de tokens regroupés par batch.
+  "max_num_batched_tokens": 32768,
+
+  // Espace disque (en Go) pour l’échange (swap) si mémoire GPU insuffisante.
+  "swap_space_gb": 32,
+
+  // Mémoire CPU (en Go) à décharger pour soulager la GPU.
+  "cpu_offload_gb": 0
+}

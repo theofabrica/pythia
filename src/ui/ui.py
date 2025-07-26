@@ -1,0 +1,206 @@
+import sys
+import subprocess
+import threading
+import requests
+import time
+import importlib
+from importlib import import_module
+from pathlib import Path
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QLabel, QPushButton, QLineEdit, QTextEdit,
+    QVBoxLayout, QHBoxLayout, QComboBox, QFileDialog
+)
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QPainter
+from src.tools.chat_memory import ChatMemory
+
+class StatusLight(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.color = QColor("red")
+        self.setFixedSize(20, 20)
+
+    def set_color(self, color_name):
+        self.color = QColor(color_name)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setBrush(self.color)
+        painter.drawEllipse(0, 0, self.width(), self.height())
+
+class ModelChatUI(QWidget):
+    append_message = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.vllm_thread = None
+        self.vllm_process = None
+        self.memory = ChatMemory()
+        self.init_ui()
+
+    def init_ui(self):
+        project_dir = Path(__file__).resolve().parents[2]
+        models_path = project_dir / "src" / "models"
+
+        self.model_list = QComboBox()
+        self.model_list.addItems([folder.name for folder in models_path.iterdir() if folder.is_dir()])
+
+        self.launch_button = QPushButton("Lancer vLLM")
+        self.launch_button.clicked.connect(self.launch_vllm)
+
+        self.close_button = QPushButton("Fermer vLLM")
+        self.close_button.setEnabled(False)
+        self.close_button.clicked.connect(self.close_vllm)
+
+        self.status_light = StatusLight()
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("Modèle :"))
+        header_layout.addWidget(self.model_list)
+        header_layout.addWidget(self.launch_button)
+        header_layout.addWidget(self.close_button)
+        header_layout.addWidget(self.status_light)
+
+        self.chain_list = QComboBox()
+        self.refresh_chains()
+        chain_layout = QHBoxLayout()
+        chain_layout.addWidget(QLabel("Chains :"))
+        chain_layout.addWidget(self.chain_list)
+
+        self.file_path_edit = QLineEdit()
+        self.file_path_edit.setPlaceholderText("Sélectionner un PDF…")
+
+        self.browse_button = QPushButton("Parcourir")
+        self.browse_button.clicked.connect(self.browse_pdf)
+
+        self.clear_chat_button = QPushButton("Vider chat")
+        self.clear_chat_button.clicked.connect(self.clear_chat)
+
+
+        pdf_layout = QHBoxLayout()
+        pdf_layout.addWidget(self.file_path_edit)
+        pdf_layout.addWidget(self.browse_button)
+        pdf_layout.addWidget(self.clear_chat_button)
+
+        self.chat_display = QTextEdit()
+        self.chat_display.setReadOnly(True)
+
+        self.prompt_input = QLineEdit()
+        self.send_button = QPushButton("Envoyer")
+        self.send_button.clicked.connect(self.send_prompt)
+        self.prompt_input.returnPressed.connect(self.send_prompt)
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(self.prompt_input)
+        input_layout.addWidget(self.send_button)
+
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(QLabel("vLLM"))
+        main_layout.addLayout(header_layout)
+        main_layout.addWidget(QLabel("Chains"))
+        main_layout.addLayout(chain_layout)
+        main_layout.addLayout(pdf_layout)
+        main_layout.addWidget(self.chat_display)
+        main_layout.addLayout(input_layout)
+
+        self.setLayout(main_layout)
+        self.setWindowTitle("Interface Chat LLM")
+        self.append_message.connect(self.chat_display.append)
+
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self.check_server_status)
+        self.status_timer.start(2000)
+
+    def refresh_chains(self):
+        project_dir = Path(__file__).resolve().parents[2]
+        chains_path = project_dir / "src" / "chains"
+        chains = [f.stem for f in chains_path.glob("*.py") if f.is_file() and not f.name.startswith("__")]
+        self.chain_list.clear()
+        self.chain_list.addItems(chains)
+
+    def vllm_server_loop(self, model_name):
+        project_dir = Path(__file__).resolve().parents[2]
+        vllm_path = project_dir / "src" / "vllm_server" / "vllm_chat_server.py"
+        parameters_path = project_dir / "src" / "vllm_server" / f"{model_name}.json"
+        if not parameters_path.exists():
+            print(f"[Erreur] Fichier paramètres {parameters_path} manquant.")
+            return
+        self.vllm_process = subprocess.Popen([sys.executable, str(vllm_path), "--model_name", model_name])
+        self.vllm_process.wait()
+
+    def launch_vllm(self):
+        if self.vllm_thread is None or not self.vllm_thread.is_alive():
+            model_name = self.model_list.currentText()
+            self.vllm_thread = threading.Thread(target=self.vllm_server_loop, args=(model_name,), daemon=True)
+            self.vllm_thread.start()
+            self.status_light.set_color("orange")
+
+    def close_vllm(self):
+        if self.vllm_process:
+            self.vllm_process.terminate()
+            self.vllm_process.wait(timeout=5)
+            self.vllm_process = None
+            subprocess.Popen(["/home/theoub02/code/flush_gpu/flush_gpus"])
+            time.sleep(1)
+            self.check_server_status()
+
+    def send_prompt(self):
+        prompt = self.prompt_input.text().strip()
+        if not prompt:
+            return
+        self.append_message.emit(f"[Vous] {prompt}")
+        self.memory.add_user_message(prompt)
+        self.prompt_input.clear()
+        selected_chain = self.chain_list.currentText()
+        threading.Thread(target=self.query_chain, args=(prompt, selected_chain), daemon=True).start()
+
+    def query_chain(self, prompt, chain_name):
+        try:
+            module_path = f"src.chains.{chain_name}"
+            chain_module = importlib.import_module(module_path)
+            project_dir = Path(__file__).resolve().parents[2]
+            model_name = self.model_list.currentText()
+            model_path = project_dir / "src" / "models" / model_name
+            response = chain_module.run_chain(prompt, self.memory.get_history(), model_path=str(model_path))
+            self.memory.add_ai_message(response)
+            self.append_message.emit(f"[LLM] {response}")
+        except Exception as e:
+            self.append_message.emit(f"[Erreur chain] {str(e)}")
+
+    def check_server_status(self):
+        def ping():
+            try:
+                response = requests.get("http://localhost:8000/v1/status", timeout=1)
+                if response.status_code == 200 and response.json().get("ready") is True:
+                    self.status_light.set_color("green")
+                    self.close_button.setEnabled(True)
+                else:
+                    self.status_light.set_color("orange")
+                    self.close_button.setEnabled(False)
+            except Exception:
+                self.status_light.set_color("red")
+                self.close_button.setEnabled(False)
+        threading.Thread(target=ping, daemon=True).start()
+
+    def browse_pdf(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Choisir un PDF", str(Path.home()), "PDF (*.pdf)"
+        )
+        if path:
+            self.file_path_edit.setText(path)
+
+    def clear_chat(self):
+        self.chat_display.clear()
+        self.memory.clear()
+
+
+    def closeEvent(self, event):
+        self.close_vllm()
+        if self.vllm_thread:
+            self.vllm_thread.join(timeout=5)
+        event.accept()
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = ModelChatUI()
+    window.show()
+    sys.exit(app.exec_())

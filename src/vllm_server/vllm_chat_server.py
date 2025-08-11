@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI):
         enable_prefix_caching=True,
         swap_space=swap_space_gb,
         cpu_offload_gb=cpu_offload_gb,
+        enforce_eager=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model_ready = True

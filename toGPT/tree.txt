@@ -1,5 +1,12 @@
 (base) theoub02@theoub02:~/ai_gen/Projets/pythia$ tree
 .
+├── docker
+│   ├── pythia-compose.yml
+│   ├── pythia-dockerfile
+│   └── requirements.txt
+├── documentation
+│   ├── RAG.odt
+│   └── rag_strategy.png
 ├── main.py
 ├── pyproject.toml
 ├── README.md
@@ -7,15 +14,62 @@
 │   ├── chains
 │   │   ├── __pycache__
 │   │   │   └── simple_chat.cpython-311.pyc
-│   │   └── simple_chat.py
+│   │   ├── simple_chat.py
+│   │   └── simple_RAG_chain.py
 │   ├── models
 │   │   ├── Llama-3.1-8B-Instruct
 │   │   ├── Llama-4-Scout-17B-16E-Instruct
 │   │   └── Mistral-7B-Instruct-v0.3
+│   ├── pdf_examples
+│   │   ├── laBible.pdf
+│   │   ├── La Seconde Guerre mondiale Pour les Nuls - Robert Belot.pdf
+│   │   └── Manon_Lescaut.pdf
 │   ├── tools
 │   │   ├── chat_memory.py
-│   │   └── __pycache__
-│   │       └── chat_memory.cpython-311.pyc
+│   │   ├── flush_gpu.py
+│   │   ├── __pycache__
+│   │   │   └── chat_memory.cpython-311.pyc
+│   │   └── RAG
+│   │       ├── pdf_loader.py
+│   │       ├── __pycache__
+│   │       │   └── pdf_loader.cpython-311.pyc
+│   │       ├── TEI
+│   │       │   └── docker-compose.yml
+│   │       └── VectorStore
+│   │           └── milvus_local
+│   │               ├── docker-compose.yml
+│   │               └── volumes
+│   │                   ├── etcd
+│   │                   │   └── member  [error opening dir]
+│   │                   ├── milvus
+│   │                   │   ├── data
+│   │                   │   │   └── mmap
+│   │                   │   │       └── mmap_chunk_manager
+│   │                   │   ├── rdb_data
+│   │                   │   │   ├── 000005.log
+│   │                   │   │   ├── 000012.log
+│   │                   │   │   ├── CURRENT
+│   │                   │   │   ├── IDENTITY
+│   │                   │   │   ├── LOCK
+│   │                   │   │   ├── LOG
+│   │                   │   │   ├── LOG.old.1754562685552339
+│   │                   │   │   ├── MANIFEST-000011
+│   │                   │   │   ├── OPTIONS-000009
+│   │                   │   │   └── OPTIONS-000014
+│   │                   │   └── rdb_data_meta_kv
+│   │                   │       ├── 000009.sst
+│   │                   │       ├── 000011.log
+│   │                   │       ├── CURRENT
+│   │                   │       ├── IDENTITY
+│   │                   │       ├── LOCK
+│   │                   │       ├── LOG
+│   │                   │       ├── LOG.old.1754562685484321
+│   │                   │       ├── MANIFEST-000010
+│   │                   │       ├── OPTIONS-000007
+│   │                   │       └── OPTIONS-000013
+│   │                   ├── minio
+│   │                   │   └── a-bucket
+│   │                   └── pulsar
 │   ├── ui
 │   │   └── ui.py
 │   └── vllm_server
@@ -28,12 +82,15 @@
 │       └── vllm_chat_server.py
 ├── toGPT
 │   ├── chat_memory.txt
-│   ├── close_vllm_server.txt
 │   ├── Llama-3.1-8B-Instruct.txt
+│   ├── pdf_loader.txt
+│   ├── pythia-compose.txt
+│   ├── pythia-dockerfile.txt
+│   ├── requirements.txt
 │   ├── simple_chat.txt
+│   ├── simple_RAG_chain.txt
 │   ├── ui.txt
 │   └── vllm_chat_server.txt
 └── uv.lock
 
-13 directories, 21 files
-
+33 directories, 59 files

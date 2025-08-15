@@ -12,11 +12,14 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QLineEdit, QTextEdit,
     QVBoxLayout, QHBoxLayout, QComboBox, QFileDialog
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QProcess
 from PyQt5.QtGui import QColor, QPainter
 
 from src.tools.chat_memory import ChatMemory
 from src.tools.RAG.pdf_loader import ingest_pdf
+from pymilvus import connections, utility
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 
 # --------------------------------------------------------------------------- #
 #                           Widgets utilitaires                               #
@@ -59,6 +62,8 @@ class ModelChatUI(QWidget):
         self.tei_log_process = None  # Popen docker logs
         self.current_pdf_path: str | None = None  # stocke le PDF sélectionné
         self.init_ui()
+        self.tei_ready = False
+        self.milvus_ready = False
 
 
     # --------------------------- UI building -------------------------------- #
@@ -124,12 +129,19 @@ class ModelChatUI(QWidget):
         self.doc_load_button.setEnabled(False)
         self.doc_load_button.clicked.connect(self.load_pdf)
 
+        # --- bouton de gestion Milvus ---
+        self.manage_files_button = QPushButton("Gérer les fichiers")
+        self.manage_files_button.setEnabled(False)
+        self.manage_files_button.clicked.connect(self.open_milvus_manager)
+
+
         self.doc_status_light = StatusLight()  # témoin d’état du chargeur PDF
 
         doc_layout = QHBoxLayout()
         doc_layout.addWidget(self.file_path_edit)
         doc_layout.addWidget(self.browse_button)
         doc_layout.addWidget(self.doc_load_button)
+        doc_layout.addWidget(self.manage_files_button)
         doc_layout.addWidget(self.doc_status_light)
 
         # --- Zone de chat --------------------------------------------------------
@@ -271,74 +283,42 @@ class ModelChatUI(QWidget):
             self.append_message.emit(f"[LLM] {response}")
         except Exception as e:
             self.append_message.emit(f"[Erreur chain] {e}")
-    # --- RAG ------------------------------------------------------
+
+    # ----------------------- RAG Management ---------------------------- #
+
     def launch_rag_tools(self):
-        """Lance les containers TEI + Milvus, puis surveille la disponibilité de Milvus."""
+        """TEI -> attendre Ready (logs) -> lancer Milvus -> healthcheck Milvus -> voyant vert."""
 
         def _run():
-            logging.info("[RAG] Lancement des containers TEI + Milvus...")
+            logging.info("[RAG] Démarrage TEI…")
             project_dir = Path(__file__).resolve().parents[2]
             milvus_dir = project_dir / "src" / "tools" / "RAG" / "VectorStore" / "milvus_local"
             tei_dir = project_dir / "src" / "tools" / "RAG" / "TEI"
 
-            subprocess.run(["docker", "compose", "--env-file", ".env", "-f", "docker-compose.yml", "up", "-d"],
-                           cwd=milvus_dir)
-            subprocess.run(["docker", "compose", "up", "-d"], cwd=tei_dir)
+            # réinitialise les flags UI
+            self.tei_ready = False
+            self.milvus_ready = False
 
+            # TEI seul
+            subprocess.run(["docker", "compose", "up", "-d"], cwd=tei_dir, check=False)
+
+            # Stream logs TEI
             if self.tei_log_thread is None or not self.tei_log_thread.is_alive():
                 self.tei_log_thread = threading.Thread(target=self.stream_tei_logs, daemon=True)
                 self.tei_log_thread.start()
 
-            # Attente fixe (modèle TEI très long à charger)
-            def delayed_check():
-                logging.info("[RAG] Attente du chargement initial (TEI + Milvus)...")
-                time.sleep(60)
-                self.wait_for_milvus_ready_background()
-
-            threading.Thread(target=delayed_check, daemon=True).start()
+            # >>> CORRECTION PRINCIPALE : bon nom de fonction cible <<<
+            threading.Thread(
+                target=self.wait_for_tei_ready_then_launch_milvus,
+                args=(milvus_dir,),
+                daemon=True
+            ).start()
 
         threading.Thread(target=_run, daemon=True).start()
         self.tei_status_light.set_color("orange")
 
-    def wait_for_milvus_ready_background(self, max_wait=120, interval=5):
-        """Vérifie si Milvus est prêt, dans un thread séparé (après délai de chauffe)."""
-
-        start_time = time.time()
-        while (time.time() - start_time) < max_wait:
-            try:
-                r = requests.get("http://milvus-standalone:19530", timeout=1)
-                if r.status_code == 200:
-                    logging.info("[RAG] Milvus est prêt.")
-                    self.tei_status_light.set_color("green")
-                    self.tei_close_button.setEnabled(True)
-                    return
-            except Exception:
-                pass
-            logging.info("[RAG] Attente de Milvus...")
-            time.sleep(interval)
-
-        logging.error("[RAG] Milvus n'a pas répondu après le délai imparti.")
-
-    def close_rag_tools(self):
-        """Arrête les containers TEI + Milvus et coupe les logs."""
-        def _stop():
-            project_dir = Path(__file__).resolve().parents[2]
-            milvus_dir = project_dir / "src" / "tools" / "RAG" / "VectorStore" / "milvus_local"
-            tei_dir = project_dir / "src" / "tools" / "RAG" / "TEI"
-
-            subprocess.run(["docker", "compose", "down"], cwd=tei_dir)
-            subprocess.run(["docker", "compose", "--env-file", ".env", "-f", "docker-compose.yml", "down"],
-                           cwd=milvus_dir)
-
-            if self.tei_log_process and self.tei_log_process.poll() is None:
-                self.tei_log_process.terminate()
-                self.tei_log_process.wait(timeout=3)
-
-        threading.Thread(target=_stop, daemon=True).start()
-        self.tei_status_light.set_color("red")
-        self.tei_close_button.setEnabled(False)
-
     def stream_tei_logs(self):
+        """Suivi non bloquant des logs TEI."""
         self.tei_log_process = subprocess.Popen(
             ["docker", "logs", "-f", "tei"],
             stdout=subprocess.PIPE,
@@ -349,11 +329,142 @@ class ModelChatUI(QWidget):
         for line in self.tei_log_process.stdout:
             print(f"[TEI] {line.rstrip()}")
 
+    def wait_for_tei_ready_then_launch_milvus(self, milvus_dir, max_wait=900, poll_interval=2):
+        start = time.time()
+        tei_ready = False
+
+        proc = subprocess.Popen(
+            ["docker", "logs", "-f", "tei"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        while (time.time() - start) < max_wait:
+            line = proc.stdout.readline()
+            if not line:
+                time.sleep(poll_interval)
+                continue
+            print(f"[TEI] {line.rstrip()}")
+            if "Ready" in line:
+                print("[RAG] TEI Ready détecté (post-warmup).")
+                tei_ready = True
+                self.tei_ready = True
+                break
+
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
+        if not tei_ready:
+            print("[RAG] TEI non prêt dans le délai imparti.")
+            return
+
+        # Lire IP hôte depuis le fichier généré par pythia.sh
+        host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+        if host_ip_file.exists():
+            with open(host_ip_file) as f:
+                host_ip = f.read().strip()
+        else:
+            host_ip = "172.17.0.1"
+            print(f"[WARN] Fichier docker_host_ip.txt introuvable, fallback sur {host_ip}")
+
+        # Lancer Milvus via le serveur Flask de l’hôte
+        print(f"[RAG] Envoi requête de démarrage Milvus à {host_ip}...")
+        try:
+            r = requests.post(f"http://{host_ip}:5055/milvus/up", timeout=10)
+            if r.status_code == 200:
+                print("[RAG] Requête envoyée avec succès. Attente démarrage Milvus...")
+            else:
+                print(f"[RAG] Échec lancement Milvus (status {r.status_code}): {r.text}")
+                return
+        except Exception as e:
+            print(f"[RAG] Impossible de contacter le launcher Milvus : {e}")
+            return
+
+        # Healthcheck Milvus (gRPC)
+        print("[RAG] Healthcheck Milvus (connexion gRPC)…")
+        if self._milvus_healthcheck():
+            print("[RAG] Milvus opérationnel. RAG Tools prêts.")
+            self.milvus_ready = True
+            self.tei_status_light.set_color("green")
+            self.tei_close_button.setEnabled(True)
+        else:
+            print("[RAG] Milvus non opérationnel après démarrage.")
+
+    def _milvus_healthcheck(self, max_wait=60, interval=5) -> bool:
+        """Connect -> get_server_version -> list_collections (tolérant si aucune collection)."""
+        start_time = time.time()
+        while (time.time() - start_time) < max_wait:
+            try:
+                connections.connect(alias="default", host="milvus-standalone", port="19530")
+                ver = utility.get_server_version()
+                logging.info(f"[RAG] Milvus version: {ver}")
+                try:
+                    cols = utility.list_collections()
+                    logging.info(f"[RAG] Milvus collections: {cols}")
+                except Exception as e:
+                    logging.info(f"[RAG] list_collections non bloquant: {e}")
+                return True
+            except Exception as e:
+                logging.info(f"[RAG] Attente de Milvus… ({e})")
+                time.sleep(interval)
+        return False
+
+    def close_rag_tools(self):
+        self.tei_ready = False
+        self.milvus_ready = False
+        self.tei_status_light.set_color("red")
+        self.tei_close_button.setEnabled(False)
+
+        def _stop():
+            project_dir = Path(__file__).resolve().parents[2]
+            tei_dir = project_dir / "src" / "tools" / "RAG" / "TEI"
+
+            # Arrêt TEI
+            subprocess.run(["docker", "compose", "down"], cwd=tei_dir, check=False)
+
+            # Lire IP hôte depuis le fichier généré par pythia.sh
+            host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+            if host_ip_file.exists():
+                with open(host_ip_file) as f:
+                    host_ip = f.read().strip()
+            else:
+                host_ip = "172.17.0.1"
+                print(f"[WARN] Fichier docker_host_ip.txt introuvable, fallback sur {host_ip}")
+
+            # Arrêt Milvus via launcher
+            print(f"[RAG] Envoi requête arrêt Milvus à {host_ip}...")
+            try:
+                r = requests.post(f"http://{host_ip}:5055/milvus/down", timeout=10)
+                if r.status_code == 200:
+                    print("[RAG] Milvus arrêté via launcher.")
+                else:
+                    print(f"[RAG] Échec arrêt Milvus (status {r.status_code}): {r.text}")
+            except Exception as e:
+                print(f"[RAG] Impossible de contacter le launcher Milvus pour l’arrêt : {e}")
+
+            # Stop suivi logs TEI
+            if self.tei_log_process and self.tei_log_process.poll() is None:
+                try:
+                    self.tei_log_process.terminate()
+                    self.tei_log_process.wait(timeout=3)
+                except Exception:
+                    pass
+            self.tei_log_process = None
+            self.tei_log_thread = None
+
+        threading.Thread(target=_stop, daemon=True).start()
+
     # ----------------------- Server health polling ---------------------------- #
 
     def check_server_status(self):
-        """Met à jour le voyant et l’état du bouton « Fermer »."""
-        def ping():
+        """Met à jour les voyants sans court-circuiter la séquence RAG."""
+
+        # vLLM
+        def ping_vllm():
             try:
                 r = requests.get("http://localhost:8000/v1/status", timeout=1)
                 if r.status_code == 200 and r.json().get("ready") is True:
@@ -366,22 +477,28 @@ class ModelChatUI(QWidget):
                 self.status_light.set_color("red")
                 self.close_button.setEnabled(False)
 
-        threading.Thread(target=ping, daemon=True).start()
+        threading.Thread(target=ping_vllm, daemon=True).start()
 
-        def ping_tei():
-            try:
-                r = requests.get("http://tei:80/health", timeout=1)
-                if r.status_code == 200:  # 200 suffit
-                    self.tei_status_light.set_color("green")
-                    self.tei_close_button.setEnabled(True)
-                else:
-                    self.tei_status_light.set_color("orange")
-                    self.tei_close_button.setEnabled(False)
-            except Exception:
+        # RAG (TEI + Milvus) — basé SEULEMENT sur les flags
+        def update_rag_light():
+            if self.tei_ready and self.milvus_ready:
+                self.tei_status_light.set_color("green")
+                self.tei_close_button.setEnabled(True)
+                self.manage_files_button.setEnabled(True)
+            elif self.tei_ready and not self.milvus_ready:
+                self.tei_status_light.set_color("orange")
+                self.tei_close_button.setEnabled(False)
+                self.manage_files_button.setEnabled(False)
+            else:
                 self.tei_status_light.set_color("red")
                 self.tei_close_button.setEnabled(False)
+                self.manage_files_button.setEnabled(False)
 
-        threading.Thread(target=ping_tei, daemon=True).start()
+        update_rag_light()
+
+        # mise à jour immédiate sans requête réseau
+        threading.Thread(target=update_rag_light, daemon=True).start()
+
     # --------------------------- PDF helpers ---------------------------------- #
 
     def browse_pdf(self):
@@ -394,28 +511,41 @@ class ModelChatUI(QWidget):
             self.doc_load_button.setEnabled(True)
 
     def load_pdf(self):
-        """Charge le PDF sélectionné via pdf_loader."""
         self.current_pdf_path = self.file_path_edit.text().strip()
         if not self.current_pdf_path:
             return
 
-        # Appel au loader externe
         try:
             from src.tools.RAG.pdf_loader import ingest_pdf
-            ingest_pdf(self.current_pdf_path)
-            self.doc_status_light.set_color("green")
-            self.append_message.emit(f"[RAG] PDF indexé avec succès : {Path(self.current_pdf_path).name}")
-            self.doc_load_button.setEnabled(False)
+            result = ingest_pdf(self.current_pdf_path)
+            ok = bool(result.get("ok", False))
+            chunks = int(result.get("chunks", 0))
+            coll = result.get("collection", "")
+            msg = result.get("msg", "")
+
+            if ok:
+                self.doc_status_light.set_color("green")
+                #self.append_message.emit(f"[RAG] PDF indexé ✔ Collection={coll}, Chunks={chunks}, {msg}")
+                self.doc_load_button.setEnabled(False)
+            else:
+                self.doc_status_light.set_color("red")
+                self.append_message.emit(f"[RAG] Échec indexation ✖ Collection={coll}, Chunks={chunks}, {msg}")
+
         except Exception as e:
             self.doc_status_light.set_color("red")
             self.append_message.emit(f"[Erreur PDF] {e}")
+
+    def open_milvus_manager(self):
+        """Ouvre la fenêtre de gestion des fichiers Milvus."""
+        project_dir = Path(__file__).resolve().parents[2]
+        manager_path = project_dir / "src" / "tools" / "RAG" / "VectorStore" / "milvus_management" / "milvus_manager.py"
+        subprocess.Popen([sys.executable, str(manager_path)])
 
     # ------------------------- Fermeture clean -------------------------------- #
 
     def closeEvent(self, event):
         """On ferme l’appli : stoppe vLLM et TEI."""
         self.close_vllm()
-        self.close_tei()
         if self.vllm_thread:
             self.vllm_thread.join(timeout=5)
         event.accept()

@@ -36,40 +36,45 @@
 │   │       ├── TEI
 │   │       │   └── docker-compose.yml
 │   │       └── VectorStore
-│   │           └── milvus_local
-│   │               ├── docker-compose.yml
-│   │               └── volumes
+│   │           ├── milvus_local
+│   │           │   ├── docker-compose.yml
+│   │           │   └── volumes
+│   │           │       ├── etcd
+│   │           │       │   └── member  [error opening dir]
+│   │           │       ├── milvus
+│   │           │       │   ├── data
+│   │           │       │   │   └── mmap
+│   │           │       │   │       └── mmap_chunk_manager
+│   │           │       │   ├── rdb_data
+│   │           │       │   │   ├── 000005.log
+│   │           │       │   │   ├── 000012.log
+│   │           │       │   │   ├── CURRENT
+│   │           │       │   │   ├── IDENTITY
+│   │           │       │   │   ├── LOCK
+│   │           │       │   │   ├── LOG
+│   │           │       │   │   ├── LOG.old.1754562685552339
+│   │           │       │   │   ├── MANIFEST-000011
+│   │           │       │   │   ├── OPTIONS-000009
+│   │           │       │   │   └── OPTIONS-000014
+│   │           │       │   └── rdb_data_meta_kv
+│   │           │       │       ├── 000009.sst
+│   │           │       │       ├── 000011.log
+│   │           │       │       ├── CURRENT
+│   │           │       │       ├── IDENTITY
+│   │           │       │       ├── LOCK
+│   │           │       │       ├── LOG
+│   │           │       │       ├── LOG.old.1754562685484321
+│   │           │       │       ├── MANIFEST-000010
+│   │           │       │       ├── OPTIONS-000007
+│   │           │       │       └── OPTIONS-000013
+│   │           │       ├── minio
+│   │           │       │   └── a-bucket
+│   │           │       └── pulsar
+│   │           └── milvus_management
+│   │               └── milvus_volume
 │   │                   ├── etcd
-│   │                   │   └── member  [error opening dir]
 │   │                   ├── milvus
-│   │                   │   ├── data
-│   │                   │   │   └── mmap
-│   │                   │   │       └── mmap_chunk_manager
-│   │                   │   ├── rdb_data
-│   │                   │   │   ├── 000005.log
-│   │                   │   │   ├── 000012.log
-│   │                   │   │   ├── CURRENT
-│   │                   │   │   ├── IDENTITY
-│   │                   │   │   ├── LOCK
-│   │                   │   │   ├── LOG
-│   │                   │   │   ├── LOG.old.1754562685552339
-│   │                   │   │   ├── MANIFEST-000011
-│   │                   │   │   ├── OPTIONS-000009
-│   │                   │   │   └── OPTIONS-000014
-│   │                   │   └── rdb_data_meta_kv
-│   │                   │       ├── 000009.sst
-│   │                   │       ├── 000011.log
-│   │                   │       ├── CURRENT
-│   │                   │       ├── IDENTITY
-│   │                   │       ├── LOCK
-│   │                   │       ├── LOG
-│   │                   │       ├── LOG.old.1754562685484321
-│   │                   │       ├── MANIFEST-000010
-│   │                   │       ├── OPTIONS-000007
-│   │                   │       └── OPTIONS-000013
-│   │                   ├── minio
-│   │                   │   └── a-bucket
-│   │                   └── pulsar
+│   │                   └── minio
 │   ├── ui
 │   │   └── ui.py
 │   └── vllm_server
@@ -82,6 +87,7 @@
 │       └── vllm_chat_server.py
 ├── toGPT
 │   ├── chat_memory.txt
+│   ├── docker-compose.txt
 │   ├── Llama-3.1-8B-Instruct.txt
 │   ├── pdf_loader.txt
 │   ├── pythia-compose.txt
@@ -89,8 +95,8 @@
 │   ├── requirements.txt
 │   ├── simple_chat.txt
 │   ├── simple_RAG_chain.txt
-│   ├── ui.txt
 │   └── vllm_chat_server.txt
 └── uv.lock
 
-33 directories, 59 files
+38 directories, 59 files
+

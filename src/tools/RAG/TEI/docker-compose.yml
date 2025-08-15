@@ -1,0 +1,29 @@
+services:
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cuda-1.7.4
+    container_name: tei
+    restart: unless-stopped
+    ports:
+      - "5555:80"
+    environment:
+      MAX_CLIENT_BATCH_SIZE: 512        # côté serveur (HTTP)
+      MAX_BATCH_TOKENS: 32000           # idem
+      CUDA_VISIBLE_DEVICES: "1"         # GPU 1 uniquement
+    volumes:
+      - /media/theoub02/DATA/ai_models/LLM_embeddings:/models
+    command: >
+      --model-id /models/multilingual-e5-large
+      --max-batch-tokens 32000
+      --payload-limit 20000000         
+      --auto-truncate                  
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    networks:
+      - docker_default
+
+networks:
+  docker_default:
+    external: true

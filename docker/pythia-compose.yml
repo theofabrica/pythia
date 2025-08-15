@@ -1,0 +1,36 @@
+services:
+  pythia:
+    build:
+      context: .
+      dockerfile: pythia-dockerfile
+    container_name: pythia
+    image: pythia
+    runtime: nvidia
+    ipc: host
+    volumes:
+      - ../src:/app/src
+      - /media/theoub02/DATA/ai_models/Llama:/models/Llama:ro
+      - /media/theoub02/DATA/ai_models/LLM_embeddings:/models/LLM_embeddings:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix  # Support affichage X11
+      - /var/run/docker.sock:/var/run/docker.sock  # Accès Docker hôte
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - LITELLM_CONFIG_PATH=/app/src/vllm_server/litellm.config.json
+
+    ports:
+      - "8000:8000"
+    networks:
+      - docker_default
+    restart: unless-stopped
+
+networks:
+  docker_default:
+    name: docker_default

@@ -14,7 +14,7 @@ python-dotenv
 transformers==4.51.1
 sentence-transformers
 uvicorn
-vllm==0.9.1
+vllm==0.9.2
 requests
 pymilvus
 langchain-milvus

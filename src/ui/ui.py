@@ -318,7 +318,7 @@ class ModelChatUI(QWidget):
         self.tei_status_light.set_color("orange")
 
     def stream_tei_logs(self):
-        """Suivi non bloquant des logs TEI."""
+        """Suivi non bloquant des logs TEI + détection du 'Ready'."""
         self.tei_log_process = subprocess.Popen(
             ["docker", "logs", "-f", "tei"],
             stdout=subprocess.PIPE,
@@ -328,40 +328,15 @@ class ModelChatUI(QWidget):
         )
         for line in self.tei_log_process.stdout:
             print(f"[TEI] {line.rstrip()}")
-
-    def wait_for_tei_ready_then_launch_milvus(self, milvus_dir, max_wait=900, poll_interval=2):
-        start = time.time()
-        tei_ready = False
-
-        proc = subprocess.Popen(
-            ["docker", "logs", "-f", "tei"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-        while (time.time() - start) < max_wait:
-            line = proc.stdout.readline()
-            if not line:
-                time.sleep(poll_interval)
-                continue
-            print(f"[TEI] {line.rstrip()}")
-            if "Ready" in line:
+            if not self.tei_ready and "Ready" in line:
                 print("[RAG] TEI Ready détecté (post-warmup).")
-                tei_ready = True
                 self.tei_ready = True
-                break
+                threading.Thread(
+                    target=self.launch_milvus_after_tei_ready,
+                    daemon=True
+                ).start()
 
-        if proc and proc.poll() is None:
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-
-        if not tei_ready:
-            print("[RAG] TEI non prêt dans le délai imparti.")
-            return
-
+    def launch_milvus_after_tei_ready(self):
         # Lire IP hôte depuis le fichier généré par pythia.sh
         host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
         if host_ip_file.exists():
@@ -544,12 +519,11 @@ class ModelChatUI(QWidget):
     # ------------------------- Fermeture clean -------------------------------- #
 
     def closeEvent(self, event):
-        """On ferme l’appli : stoppe vLLM et TEI."""
+        self.status_timer.stop()  # stoppe le polling
         self.close_vllm()
         if self.vllm_thread:
             self.vllm_thread.join(timeout=5)
         event.accept()
-
 
 # --------------------------------------------------------------------------- #
 #                                Entrée main                                  #

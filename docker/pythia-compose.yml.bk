@@ -1,0 +1,43 @@
+services:
+  pythia:
+    build:
+      context: .
+      dockerfile: pythia-dockerfile
+    container_name: pythia
+    image: pythia
+    runtime: nvidia
+    ipc: host
+    shm_size: "16g"   # 🔹 Indispensable pour CUDA Graphs
+    volumes:
+      - ../src:/app/src
+      - /media/theoub02/DATA/ai_models/Llama:/models/Llama:ro
+      - /media/theoub02/DATA/ai_models/LLM_embeddings:/models/LLM_embeddings:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - LITELLM_CONFIG_PATH=/app/src/vllm_server/litellm.config.json
+      # 🔹 Optimisations CUDA Graphs
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - NCCL_P2P_LEVEL=NVL
+      - NCCL_P2P_DISABLE=0
+      - NCCL_SHM_DISABLE=0
+      - CUDA_DEVICE_MAX_CONNECTIONS=1
+    ports:
+      - "8000:8000"
+    networks:
+      - docker_default
+    restart: unless-stopped
+
+networks:
+  docker_default:
+    name: docker_default

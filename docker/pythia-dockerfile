@@ -8,22 +8,30 @@ RUN apt-get update && apt-get install -y \
     libxcb-shm0 libxcb-icccm4 libxcb-sync1 libxcb-xfixes0 libxcb-shape0 \
     libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxkbcommon-x11-0 \
     libfontconfig1 libfreetype6 libdbus-1-3 \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
+# Installer Docker CLI dans le conteneur
 RUN curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh && rm get-docker.sh
 
-
-# Lier python à 3.11 et pip à pip3
 # Lier python à 3.11 + installer pip3.11 et créer alias
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
     curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 && \
     ln -s /usr/local/bin/pip /usr/bin/pip
 
+# Variables d'environnement optimisées pour CUDA Graphs
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV NCCL_P2P_LEVEL=NVL
+ENV NCCL_P2P_DISABLE=0
+ENV NCCL_SHM_DISABLE=0
+ENV CUDA_DEVICE_MAX_CONNECTIONS=1
+
 # Dossier de travail
 WORKDIR /app
 ENV PYTHONPATH=/app
 
-# Installer les dépendances
+# Installer les dépendances Python
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install --no-cache-dir --upgrade --upgrade-strategy eager -r requirements.txt
 

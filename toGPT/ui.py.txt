@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QLineEdit, QTextEdit,
     QVBoxLayout, QHBoxLayout, QComboBox, QFileDialog
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QProcess
 from PyQt5.QtGui import QColor, QPainter
 
 from src.tools.chat_memory import ChatMemory
@@ -24,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(nam
 # --------------------------------------------------------------------------- #
 #                           Widgets utilitaires                               #
 # --------------------------------------------------------------------------- #
-print("coco01")
+
 class StatusLight(QWidget):
     """Petit voyant circulaire rouge / orange / vert."""
     def __init__(self):
@@ -129,12 +129,19 @@ class ModelChatUI(QWidget):
         self.doc_load_button.setEnabled(False)
         self.doc_load_button.clicked.connect(self.load_pdf)
 
+        # --- bouton de gestion Milvus ---
+        self.manage_files_button = QPushButton("Gérer les fichiers")
+        self.manage_files_button.setEnabled(False)
+        self.manage_files_button.clicked.connect(self.open_milvus_manager)
+
+
         self.doc_status_light = StatusLight()  # témoin d’état du chargeur PDF
 
         doc_layout = QHBoxLayout()
         doc_layout.addWidget(self.file_path_edit)
         doc_layout.addWidget(self.browse_button)
         doc_layout.addWidget(self.doc_load_button)
+        doc_layout.addWidget(self.manage_files_button)
         doc_layout.addWidget(self.doc_status_light)
 
         # --- Zone de chat --------------------------------------------------------
@@ -323,11 +330,6 @@ class ModelChatUI(QWidget):
             print(f"[TEI] {line.rstrip()}")
 
     def wait_for_tei_ready_then_launch_milvus(self, milvus_dir, max_wait=900, poll_interval=2):
-        """
-        Attend 'Ready' dans les logs TEI (après warmup), puis lance Milvus
-        et effectue un healthcheck gRPC via pymilvus. Le voyant ne passe au vert
-        qu'après succès du healthcheck Milvus.
-        """
         start = time.time()
         tei_ready = False
 
@@ -345,9 +347,9 @@ class ModelChatUI(QWidget):
                 continue
             print(f"[TEI] {line.rstrip()}")
             if "Ready" in line:
-                logging.info("[RAG] TEI Ready détecté (post-warmup).")
+                print("[RAG] TEI Ready détecté (post-warmup).")
                 tei_ready = True
-                self.tei_ready = True  # <<< flag UI
+                self.tei_ready = True
                 break
 
         if proc and proc.poll() is None:
@@ -357,27 +359,40 @@ class ModelChatUI(QWidget):
                 pass
 
         if not tei_ready:
-            logging.error("[RAG] TEI non prêt dans le délai imparti.")
+            print("[RAG] TEI non prêt dans le délai imparti.")
             return
 
-        # Lancer Milvus maintenant
-        logging.info("[RAG] Lancement Milvus…")
-        subprocess.run(
-            ["docker", "compose", "--env-file", ".env", "-f", "docker-compose.yml", "up", "-d"],
-            cwd=milvus_dir,
-            check=False
-        )
+        # Lire IP hôte depuis le fichier généré par pythia.sh
+        host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+        if host_ip_file.exists():
+            with open(host_ip_file) as f:
+                host_ip = f.read().strip()
+        else:
+            host_ip = "172.17.0.1"
+            print(f"[WARN] Fichier docker_host_ip.txt introuvable, fallback sur {host_ip}")
+
+        # Lancer Milvus via le serveur Flask de l’hôte
+        print(f"[RAG] Envoi requête de démarrage Milvus à {host_ip}...")
+        try:
+            r = requests.post(f"http://{host_ip}:5055/milvus/up", timeout=10)
+            if r.status_code == 200:
+                print("[RAG] Requête envoyée avec succès. Attente démarrage Milvus...")
+            else:
+                print(f"[RAG] Échec lancement Milvus (status {r.status_code}): {r.text}")
+                return
+        except Exception as e:
+            print(f"[RAG] Impossible de contacter le launcher Milvus : {e}")
+            return
 
         # Healthcheck Milvus (gRPC)
-        logging.info("[RAG] Healthcheck Milvus (connexion gRPC)…")
-        # >>> CORRECTION PRINCIPALE : bon nom de fonction appelée <<<
+        print("[RAG] Healthcheck Milvus (connexion gRPC)…")
         if self._milvus_healthcheck():
-            logging.info("[RAG] Milvus opérationnel. RAG Tools prêts.")
-            self.milvus_ready = True  # <<< flag UI
-            self.tei_status_light.set_color("green")  # <<< seul endroit qui met "green"
+            print("[RAG] Milvus opérationnel. RAG Tools prêts.")
+            self.milvus_ready = True
+            self.tei_status_light.set_color("green")
             self.tei_close_button.setEnabled(True)
         else:
-            logging.error("[RAG] Milvus non opérationnel après démarrage.")
+            print("[RAG] Milvus non opérationnel après démarrage.")
 
     def _milvus_healthcheck(self, max_wait=60, interval=5) -> bool:
         """Connect -> get_server_version -> list_collections (tolérant si aucune collection)."""
@@ -399,28 +414,39 @@ class ModelChatUI(QWidget):
         return False
 
     def close_rag_tools(self):
-        """Arrête TEI et Milvus et remet l'UI dans l'état initial."""
-        # 1) Reset immédiat des flags + UI
         self.tei_ready = False
         self.milvus_ready = False
         self.tei_status_light.set_color("red")
         self.tei_close_button.setEnabled(False)
 
-        # 2) Arrêt des containers + logs en arrière-plan
         def _stop():
             project_dir = Path(__file__).resolve().parents[2]
-            milvus_dir = project_dir / "src" / "tools" / "RAG" / "VectorStore" / "milvus_local"
             tei_dir = project_dir / "src" / "tools" / "RAG" / "TEI"
 
-            # Stop containers
+            # Arrêt TEI
             subprocess.run(["docker", "compose", "down"], cwd=tei_dir, check=False)
-            subprocess.run(
-                ["docker", "compose", "--env-file", ".env", "-f", "docker-compose.yml", "down"],
-                cwd=milvus_dir,
-                check=False
-            )
 
-            # Stop suivi logs TEI proprement
+            # Lire IP hôte depuis le fichier généré par pythia.sh
+            host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+            if host_ip_file.exists():
+                with open(host_ip_file) as f:
+                    host_ip = f.read().strip()
+            else:
+                host_ip = "172.17.0.1"
+                print(f"[WARN] Fichier docker_host_ip.txt introuvable, fallback sur {host_ip}")
+
+            # Arrêt Milvus via launcher
+            print(f"[RAG] Envoi requête arrêt Milvus à {host_ip}...")
+            try:
+                r = requests.post(f"http://{host_ip}:5055/milvus/down", timeout=10)
+                if r.status_code == 200:
+                    print("[RAG] Milvus arrêté via launcher.")
+                else:
+                    print(f"[RAG] Échec arrêt Milvus (status {r.status_code}): {r.text}")
+            except Exception as e:
+                print(f"[RAG] Impossible de contacter le launcher Milvus pour l’arrêt : {e}")
+
+            # Stop suivi logs TEI
             if self.tei_log_process and self.tei_log_process.poll() is None:
                 try:
                     self.tei_log_process.terminate()
@@ -431,6 +457,7 @@ class ModelChatUI(QWidget):
             self.tei_log_thread = None
 
         threading.Thread(target=_stop, daemon=True).start()
+
     # ----------------------- Server health polling ---------------------------- #
 
     def check_server_status(self):
@@ -457,12 +484,15 @@ class ModelChatUI(QWidget):
             if self.tei_ready and self.milvus_ready:
                 self.tei_status_light.set_color("green")
                 self.tei_close_button.setEnabled(True)
+                self.manage_files_button.setEnabled(True)
             elif self.tei_ready and not self.milvus_ready:
                 self.tei_status_light.set_color("orange")
                 self.tei_close_button.setEnabled(False)
+                self.manage_files_button.setEnabled(False)
             else:
                 self.tei_status_light.set_color("red")
                 self.tei_close_button.setEnabled(False)
+                self.manage_files_button.setEnabled(False)
 
         update_rag_light()
 
@@ -504,6 +534,12 @@ class ModelChatUI(QWidget):
         except Exception as e:
             self.doc_status_light.set_color("red")
             self.append_message.emit(f"[Erreur PDF] {e}")
+
+    def open_milvus_manager(self):
+        """Ouvre la fenêtre de gestion des fichiers Milvus."""
+        project_dir = Path(__file__).resolve().parents[2]
+        manager_path = project_dir / "src" / "tools" / "RAG" / "VectorStore" / "milvus_management" / "milvus_manager.py"
+        subprocess.Popen([sys.executable, str(manager_path)])
 
     # ------------------------- Fermeture clean -------------------------------- #
 

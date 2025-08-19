@@ -7,24 +7,42 @@ services:
     image: pythia
     runtime: nvidia
     ipc: host
+    shm_size: "32g"
     volumes:
       - ../src:/app/src
       - /media/theoub02/DATA/ai_models/Llama:/models/Llama:ro
       - /media/theoub02/DATA/ai_models/LLM_embeddings:/models/LLM_embeddings:ro
-      - /tmp/.X11-unix:/tmp/.X11-unix  # Support affichage X11
-      - /var/run/docker.sock:/var/run/docker.sock  # Accès Docker hôte
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /app
     stdin_open: true
     tty: true
     environment:
+      # Python
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      - CUDA_DEVICE_ORDER=PCI_BUS_ID
-      - VLLM_WORKER_MULTIPROC_METHOD=spawn
-      - LITELLM_CONFIG_PATH=/app/src/vllm_server/litellm.config.json
 
+      # CUDA & Torch
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - CUDA_LAUNCH_BLOCKING=0
+      - CUDA_MODULE_LOADING=EAGER
+      - CUDA_DEVICE_MAX_CONNECTIONS=1
+
+      # vLLM (stabilité avant tout)
+      - VLLM_WORKER_MULTIPROC_METHOD=forkserver
+      - LITELLM_CONFIG_PATH=/app/src/vllm_server/litellm.config.json
+      - VLLM_ENFORCE_EAGER=true
+      - VLLM_LOGGING_LEVEL=INFO  # Réduit la verbosité
+
+      # NVIDIA
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+      # NCCL (réseau GPU → on garde simple)
+      - NCCL_P2P_LEVEL=SYS
+      - NCCL_ASYNC_ERROR_HANDLING=1
     ports:
       - "8000:8000"
     networks:

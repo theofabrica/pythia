@@ -97,7 +97,7 @@ def ingest_pdf(path: str) -> dict:
             "msg": f"Ingestion failed: {e}"
         }
 
-    # 7) Vérification collection
+        # 7) Vérification collection + compactage
     try:
         if not utility.has_collection(collection_name):
             log.error(f"[RAG] Collection absente après ingestion.")
@@ -112,17 +112,26 @@ def ingest_pdf(path: str) -> dict:
         col.load()
         total_entities = col.num_entities
         log.info(f"[RAG] Vérif Milvus: {total_entities} entités présentes dans {collection_name}")
+
+        # 8) Flush + compact systématiques
+        log.info(f"[RAG] Flush de la collection {collection_name}…")
+        col.flush()
+        log.info(f"[RAG] Compactage de la collection {collection_name}…")
+        col.compact()
+        log.info(f"[RAG] Flush + compact terminés pour {collection_name}")
+
+        # <<< ICI LE RETURN FINAL >>>
+        return {
+            "ok": True,
+            "chunks": total_inserted,
+            "collection": collection_name,
+            "msg": f"Ingestion terminée, {total_entities} entités présentes"
+        }
+
     except Exception as e:
         return {
             "ok": False,
             "chunks": total_inserted,
             "collection": collection_name,
-            "msg": f"Milvus check failed: {e}"
+            "msg": f"Milvus check/flush/compact failed: {e}"
         }
-
-    return {
-        "ok": True,
-        "chunks": total_inserted,
-        "collection": collection_name,
-        "msg": f"OK, entities={total_entities}"
-    }

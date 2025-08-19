@@ -2,7 +2,10 @@ import sys
 import logging
 from functools import partial
 from pymilvus import connections, Collection
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QMessageBox
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+    QPushButton, QMessageBox
+)
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -72,7 +75,17 @@ class MilvusManager(QWidget):
                 log.info(f"Suppression des données pour {pdf_path}...")
                 self.collection.delete(expr)
                 self.collection.flush()
-                QMessageBox.information(self, "Succès", f"Données supprimées pour {pdf_path}")
+
+                # 🔥 Flush + Compact automatique
+                log.info(f"Flush + compactage après suppression de {pdf_path}…")
+                compaction_id = self.collection.compact()
+                log.info(f"Compaction lancée (ID={compaction_id})")
+
+                QMessageBox.information(
+                    self, "Succès",
+                    f"Données supprimées pour {pdf_path}\n"
+                    f"Flush + compactage lancés (ID={compaction_id})"
+                )
                 self.load_data()
             except Exception as e:
                 log.error(f"Erreur suppression {pdf_path} : {e}")

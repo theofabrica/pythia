@@ -3,6 +3,20 @@ set -e
 
 cd "$(dirname "$0")/.."
 
+# -------------------------------------------------------------
+# Configuration X11 pour l’UI Qt (permet l’affichage depuis Docker)
+# Si DISPLAY n’est pas défini, on force :0 (affichage local)
+if [ -z "$DISPLAY" ]; then
+    export DISPLAY=:0
+    echo "[INFO] DISPLAY non défini, utilisation de :0"
+fi
+# Autoriser les conteneurs locaux à utiliser le serveur X11
+if command -v xhost >/dev/null 2>&1; then
+    xhost +local:docker >/dev/null 2>&1 || true
+fi
+# -------------------------------------------------------------
+
+
 # 0. Autoriser le port 5055 côté firewall
 sudo ufw allow 5055/tcp
 

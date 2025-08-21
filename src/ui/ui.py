@@ -181,47 +181,65 @@ class ModelChatUI(QWidget):
 
     # ----------------------- vLLM management ---------------------------------- #
 
-    def vllm_server_loop(self, model_name: str):
-        project_dir = Path(__file__).resolve().parents[2]
-        vllm_path = project_dir / "src" / "vllm_server" / "vllm_chat_server.py"
-
-        # NEW : start_new_session => nouveau PGID
-        self.vllm_process = subprocess.Popen(
-            [sys.executable, str(vllm_path), "--model_name", model_name],
-            start_new_session=True          # <---
-        )
-        self.vllm_process.wait()
-
     def launch_vllm(self):
-        """Thread de démarrage pour ne pas bloquer l’UI."""
-        if self.vllm_thread is None or not self.vllm_thread.is_alive():
-            model_name = self.model_list.currentText()
-            self.vllm_thread = threading.Thread(
-                target=self.vllm_server_loop, args=(model_name,), daemon=True
-            )
-            self.vllm_thread.start()
-            self.status_light.set_color("orange")
+        """Demande au launcher Flask de démarrer vLLM avec le modèle choisi."""
+
+        def _run():
+            host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+            if host_ip_file.exists():
+                with open(host_ip_file) as f:
+                    host_ip = f.read().strip()
+            else:
+                host_ip = "172.17.0.1"
+                print(f"[WARN] docker_host_ip.txt introuvable, fallback {host_ip}")
+
+            # Récupération du modèle choisi dans l'UI (exemple avec QComboBox)
+            model_name = self.model_selector.currentText().strip()
+            if not model_name:
+                print("[UI] Aucun modèle sélectionné, annulation du lancement vLLM.")
+                return
+
+            try:
+                r = requests.post(
+                    f"http://{host_ip}:5055/vllm/up",
+                    json={"model_name": model_name},
+                    timeout=10
+                )
+                if r.status_code == 200:
+                    print(f"[UI] vLLM lancement demandé avec modèle: {model_name}")
+                    self.status_light.set_color("orange")
+                else:
+                    print(f"[UI] Erreur lancement vLLM ({r.status_code}): {r.text}")
+            except Exception as e:
+                print(f"[UI] Impossible de contacter le launcher vLLM : {e}")
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def close_vllm(self):
-        """Stoppe tout le process-group vLLM puis flush GPU."""
-        import signal, os, time, subprocess
-        if self.vllm_process:
-            pgid = os.getpgid(self.vllm_process.pid)
-            os.killpg(pgid, signal.SIGTERM)          # SIGTERM group
+        """Demande au launcher Flask d’arrêter vLLM."""
+
+        def _run():
+            host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+            if host_ip_file.exists():
+                with open(host_ip_file) as f:
+                    host_ip = f.read().strip()
+            else:
+                host_ip = "172.17.0.1"
+
             try:
-                self.vllm_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(pgid, signal.SIGKILL)      # force kill
-                self.vllm_process.wait()
-            self.vllm_process = None
+                r = requests.post(f"http://{host_ip}:5055/vllm/down", timeout=10)
+                if r.status_code == 200:
+                    print("[UI] vLLM arrêt demandé au Flask launcher.")
+                else:
+                    print(f"[UI] Erreur arrêt vLLM ({r.status_code}): {r.text}")
+            except Exception as e:
+                print(f"[UI] Impossible de contacter le launcher vLLM : {e}")
 
-        # flush GPU dans un sous-processus
-        project_dir = Path(__file__).resolve().parents[2]
-        flush_script = project_dir / "src" / "tools" / "flush_gpu.py"
-        subprocess.run([sys.executable, str(flush_script)])
+            # rafraîchit le voyant
+            time.sleep(1)
+            self.check_server_status()
 
-        time.sleep(1)
-        self.check_server_status()
+        threading.Thread(target=_run, daemon=True).start()
 
         # --- Flush GPU ------------------------------------------------------
         project_dir = Path(__file__).resolve().parents[2]
@@ -436,12 +454,19 @@ class ModelChatUI(QWidget):
     # ----------------------- Server health polling ---------------------------- #
 
     def check_server_status(self):
-        """Met à jour les voyants sans court-circuiter la séquence RAG."""
+        """Met à jour les voyants vLLM et RAG sans court-circuiter la logique existante."""
 
-        # vLLM
+        # vLLM (status via endpoint sur l’hôte)
         def ping_vllm():
+            host_ip_file = Path(__file__).parent / "docker_host_ip.txt"
+            if host_ip_file.exists():
+                with open(host_ip_file) as f:
+                    host_ip = f.read().strip()
+            else:
+                host_ip = "172.17.0.1"
+
             try:
-                r = requests.get("http://localhost:8000/v1/status", timeout=1)
+                r = requests.get(f"http://{host_ip}:8000/v1/status", timeout=2)
                 if r.status_code == 200 and r.json().get("ready") is True:
                     self.status_light.set_color("green")
                     self.close_button.setEnabled(True)
@@ -452,9 +477,7 @@ class ModelChatUI(QWidget):
                 self.status_light.set_color("red")
                 self.close_button.setEnabled(False)
 
-        threading.Thread(target=ping_vllm, daemon=True).start()
-
-        # RAG (TEI + Milvus) — basé SEULEMENT sur les flags
+        # RAG (TEI + Milvus) — basé uniquement sur les flags internes
         def update_rag_light():
             if self.tei_ready and self.milvus_ready:
                 self.tei_status_light.set_color("green")
@@ -469,9 +492,8 @@ class ModelChatUI(QWidget):
                 self.tei_close_button.setEnabled(False)
                 self.manage_files_button.setEnabled(False)
 
-        update_rag_light()
-
-        # mise à jour immédiate sans requête réseau
+        # lancement en parallèle
+        threading.Thread(target=ping_vllm, daemon=True).start()
         threading.Thread(target=update_rag_light, daemon=True).start()
 
     # --------------------------- PDF helpers ---------------------------------- #

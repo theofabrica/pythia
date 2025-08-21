@@ -3,7 +3,7 @@
   "model_name": "Llama-3.1-8B-Instruct",
 
   // Chemin relatif depuis la racine du projet
-  "absolute_path": "/models/Llama/Llama-3.1-8B-Instruct",
+  "absolute_path": "/media/theoub02/DATA/ai_models/Llama/Llama-3.1-8B-Instruct",
 
   // Type de données pour les poids du modèle.
   // Valeurs possibles : "float32", "float16", "bfloat16", "fp8"

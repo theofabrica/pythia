@@ -194,7 +194,7 @@ class ModelChatUI(QWidget):
                 print(f"[WARN] docker_host_ip.txt introuvable, fallback {host_ip}")
 
             # Récupération du modèle choisi dans l'UI (exemple avec QComboBox)
-            model_name = self.model_selector.currentText().strip()
+            model_name = self.model_list.currentText().strip()
             if not model_name:
                 print("[UI] Aucun modèle sélectionné, annulation du lancement vLLM.")
                 return
